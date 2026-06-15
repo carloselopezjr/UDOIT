@@ -300,48 +300,58 @@ export function analyzeReport(report) {
   let currentTime = new Date();
   let millisecondsInADay = 86400000; // 1000 * 60 * 60 * 24
 
-  const parser = new DOMParser();
-  const fileReferences = {};
-  const mediaReferences = {};
+  const parser = new DOMParser()
+  const fileReferences = {}
+  const mediaReferences = {}
+  const fileUrlPattern = /\/files\/(\d+)/
+  const mediaFileUrlPattern = /\/media_attachments_iframe\/(\d+)/
 
   // Parse every document only once. Not every content item will have issues, but we need to parse each one anyway
   // so we can scan them for references to course files.
   Object.values(report.contentItems).forEach((contentItem) => {
-    contentItem.sections = getSectionsFromContentItem(
-      report.contentSections,
-      contentItem,
-    );
-    if (contentItem.body) {
-      let tempBody = parser.parseFromString(contentItem.body, "text/html");
+    contentItem.sections = getSectionsFromContentItem(report.contentSections, contentItem)
+    if(contentItem.body) {
+      let contentItemReference = {
+        contentItemId: contentItem.id,
+        contentItemBody: contentItem.body,
+        contentItemTitle: contentItem.title,
+        contentItemUrl: contentItem.url,
+        contentItemLmsId: contentItem.lmsContentId,
+        contentType: contentItem.contentType
+      };
 
-      // Get all of the links to files in the content item.
-      let links = tempBody.getElementsByTagName("a");
-      const fileUrlPattern = /\/files\/(\d+)/;
-      for (let i = 0; i < links.length; i++) {
+      let tempBody = parser.parseFromString(contentItem.body, 'text/html');
+
+      // Get all of the links to files in the content item. Links can be to any file, INCLUDING media files.
+      let links = tempBody.getElementsByTagName('a')
+
+      for(let i = 0; i < links.length; i++) {
         let link = links[i];
-        let href = link.getAttribute("href");
-        if (href) {
-          let match = href.match(fileUrlPattern);
-          if (match && match[1]) {
-            let fileId = match[1];
-            if (!fileReferences[fileId]) {
+        let href = link.getAttribute('href');
+        if(href) {
+          let fileMatch = href.match(fileUrlPattern);
+          if(fileMatch && fileMatch[1]) {
+            let fileId = fileMatch[1];
+            if(!fileReferences[fileId]) {
               fileReferences[fileId] = [];
             }
-            fileReferences[fileId].push({
-              contentItemId: contentItem.id,
-              contentItemBody: contentItem.body,
-              contentItemTitle: contentItem.title,
-              contentItemUrl: contentItem.url,
-              contentItemLmsId: contentItem.lmsContentId,
-              contentType: contentItem.contentType,
-            });
+            fileReferences[fileId].push(contentItemReference);
+          }
+          let mediaMatch = href.match(mediaFileUrlPattern);
+          if(mediaMatch && mediaMatch[1]) {
+            let mediaId = mediaMatch[1];
+            if (!mediaReferences[mediaId]) {
+              mediaReferences[mediaId] = [];
+            }
+            mediaReferences[mediaId].push(contentItemReference);
           }
         }
       }
 
-      // Get all of the links to media files (audio, video) in the content item.
-      let mediaLinks = tempBody.getElementsByTagName("iframe");   
-      const mediaFileUrlPattern = /\/media_attachments_iframe\/(\d+)/   
+      // Get all of the iframes with media files (audio, video) in the content item.
+      // <source> elements are used in native <video> and <audio> elements. I haven't gotten them to
+      // work in Canvas, but best to account for them being used here.
+      let mediaLinks = tempBody.querySelectorAll("iframe, source");
 
       for (let i = 0; i < mediaLinks.length; i++) {
         let mediaLink = mediaLinks[i];
@@ -353,20 +363,13 @@ export function analyzeReport(report) {
             if (!mediaReferences[mediaId]) {
               mediaReferences[mediaId] = [];
             }
-            mediaReferences[mediaId].push({
-              contentItemId: contentItem.id,
-              contentItemBody: contentItem.body,
-              contentItemTitle: contentItem.title,
-              contentItemUrl: contentItem.url,
-              contentItemLmsId: contentItem.lmsContentId,
-              contentType: contentItem.contentType,
-            })
+            mediaReferences[mediaId].push(contentItemReference);
           }
         }
       }
       
-      parsedDocuments[contentItem.id] = tempBody
-      usedContentItems[contentItem.id] = contentItem
+      parsedDocuments[contentItem.id] = tempBody;
+      usedContentItems[contentItem.id] = contentItem;
     }
   });
 
