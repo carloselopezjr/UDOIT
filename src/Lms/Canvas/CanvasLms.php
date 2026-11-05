@@ -186,6 +186,39 @@ class CanvasLms implements LmsInterface
         ]);
         $childContentItems = [];
 
+        if (!$force && $contentItem && $contentType === 'quiz') {
+            
+            $output->writeLn('this is a quiz');
+
+            // get lmsContent version number
+            $lmsVersionNumber = $lmsContent['version_number'];
+            
+            // get contentItem version number stored in metadata
+            $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
+            if (is_array($metadata)) {
+                $contentVersionNumber = $metadata['quizVersion'];
+            }
+
+            $output->writeln('Version Expected: ' . $contentVersionNumber . ' Version Received: ' . $lmsVersionNumber . '');
+
+            // If stored and incoming version number are the same, check if the quiz is published
+            // if it is published, early exit, otherwise update the quiz
+            if ($lmsVersionNumber === $contentVersionNumber) {
+                
+                if ($contentItem->isPublished()) {
+                    $output->writeLn('Quiz is published, skipping update\n');
+                    $contentItem->setActive(true);
+                    return;
+                } 
+                else {
+                    $output->writeLn('Quiz is not published, updating');
+                }
+
+            } else {
+                $output->writeLn('The Received version number is not the same as the Expected version number');
+            }
+        }
+
         if (!$force && $contentItem) {
             $contentItemUpdated = $contentItem->getUpdated();
             $lmsUpdated = new \DateTime($lmsContent['updated'], UtilityService::$timezone);
@@ -221,11 +254,25 @@ class CanvasLms implements LmsInterface
             $this->entityManager->persist($contentItem);
         }
 
+        // if contentItem is a quiz, insert its version into metadata
+        if ($contentType === 'quiz') {
+            $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
+
+            if (!is_array($metadata)) {
+                $metadata = [];
+            }
+
+            $metadata['quizVersion'] = $lmsContent['version_number'] ?? null;
+
+            $contentItem->setMetadata(json_encode($metadata, JSON_THROW_ON_ERROR));
+        }
+
         // some content types don't have an updated date, so we'll compare content
         // to find out if content has changed.
         if (in_array($contentType, ['syllabus', 'discussion_topic', 'announcement', 'quiz'])) {
             if ($contentItem->getBody() === $lmsContent['body']) {
                 if ($contentItem->getUpdated()) {
+                    // $output->writeln("this ran ");
                     $lmsContent['updated'] = $contentItem->getUpdated()->format('c');
                 }
             }
@@ -364,6 +411,55 @@ class CanvasLms implements LmsInterface
         $this->entityManager->flush();
     }
 
+    // List all quiz objects
+    public function getQuizzes(Course $course, User $user) {
+        $output = new ConsoleOutput(); // log
+        $apiDomain = $this->getApiDomain($user);
+        $apiToken = $this->getApiToken($user);
+
+        $courseId = $course->getLmsCourseId();
+
+        $canvasApi = new CanvasApi($apiDomain, $apiToken);
+
+        $url = "courses/{$courseId}/quizzes";
+
+        $res = $canvasApi->apiGet($url);
+
+        $quizList = $res->getContent();
+
+        $cleanedList = [];
+
+        foreach ($quizList as $quiz) {
+            $quizId = $quiz['id'];
+            $quizTitle = $quiz['title'];
+            $quizVersion = $quiz['version_number'];
+
+            $quizPublished = $quiz['published'];
+            
+            
+            if (empty($quizPublished)) {
+                $output->writeLn("The quiz: $quizTitle is not published, setting quizPublished to 0");
+                $quizPublished = 0;
+            }
+            
+
+            /*
+            $output->writeLn("Is the quiz, " . $quizTitle . "published : " . $quizPublished . "");
+
+            */
+
+            $cleanedList[] = [
+                'id' => $quizId,
+                'title' => $quizTitle,
+                'version' => $quizVersion,
+                'published?' => $quizPublished
+            ];
+        }
+
+        return $cleanedList;
+
+    }
+
     // Get content from Canvas and update content items
     public function updateCourseContent(Course $course, User $user, $force = false): array
     {
@@ -376,6 +472,10 @@ class CanvasLms implements LmsInterface
 
         $canvasApi = new CanvasApi($apiDomain, $apiToken);
         $scanFails = 0;
+
+        // Debug
+        $output->writeLn("Printing list of quizzes in a course");
+        $output->writeLn(print_r($this->getQuizzes($course, $user), true));
 
         foreach ($urls as $contentType => $url) {
             $response = $canvasApi->apiGet($url);
@@ -1073,9 +1173,13 @@ class CanvasLms implements LmsInterface
                 break;
 
             case 'quiz':
+                // $output->writeLn('Quiz detected');
                 $out['id'] = $lmsContent['id'];
                 $out['title'] = $lmsContent['title'];
                 $out['updated'] = 'now';
+                // $output->writeLn('Version Number: ' . $lmsContent['version_number'] . "");
+                $out['version_number'] = $lmsContent['version_number'];
+
                 $out['body'] = $lmsContent['description'];
                 $out['status'] = $lmsContent['published'];
                 $out['url'] = "{$baseUrl}/quizzes/{$lmsContent['id']}";
