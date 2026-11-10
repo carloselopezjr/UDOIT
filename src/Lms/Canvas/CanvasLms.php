@@ -218,6 +218,28 @@ class CanvasLms implements LmsInterface
                 $output->writeLn('The Received version number is not the same as the Expected version number');
             }
         }
+        
+        // Compare contentItem's body against incoming lmsContent's body
+        if (!$force && $contentItem && $contentType === "syllabus") {
+            $contentItemBody = $contentItem->getBody();
+            $lmsBody = $lmsContent['body'];
+
+            // if stored body and incoming body are the same early exit
+            if ($contentItemBody === $lmsBody) {
+                $output->writeLn('these are the same, returning early');
+                $contentItem->setActive(true);
+                return;
+            } else {
+                $output->writeLn('these are not the same');
+            }
+
+            /*
+            $output->writeLn('Debug contentItemBody:' . $contentItemBody . '');
+            $output->writeLn('Debug lmsBody' . $lmsBody . '');
+            */
+            
+        }
+        
 
         if (!$force && $contentItem) {
             $contentItemUpdated = $contentItem->getUpdated();
@@ -411,6 +433,27 @@ class CanvasLms implements LmsInterface
         $this->entityManager->flush();
     }
 
+    public function getSyllabus(Course $course, User $user) {
+
+        $output = new ConsoleOutput();
+
+        $apiToken = $this->getApiToken($user);
+        $apiDomain = $this->getApiDomain($user);
+
+        $courseId = $course->getLmsCourseId();
+
+        $canvasApi = new CanvasApi($apiDomain, $apiToken);
+
+        $url = "courses/{$courseId}?include[]=syllabus_body";
+
+        $res = $canvasApi->apiGet($url);
+        
+        $syllabusList = $res->getContent();
+
+        return $syllabusList;
+
+    }
+
     // List all quiz objects
     public function getQuizzes(Course $course, User $user) {
         $output = new ConsoleOutput(); // log
@@ -474,8 +517,11 @@ class CanvasLms implements LmsInterface
         $scanFails = 0;
 
         // Debug
-        $output->writeLn("Printing list of quizzes in a course");
-        $output->writeLn(print_r($this->getQuizzes($course, $user), true));
+        //$output->writeLn("Printing list of quizzes in a course");
+        //$output->writeLn(print_r($this->getQuizzes($course, $user), true));
+
+        $output->writeLn("Printing list of syllabi in a course");
+        $output->writeLn(print_r($this->getSyllabus($course, $user), true));
 
         foreach ($urls as $contentType => $url) {
             $response = $canvasApi->apiGet($url);
