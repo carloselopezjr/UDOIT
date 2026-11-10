@@ -218,6 +218,23 @@ class CanvasLms implements LmsInterface
                 $output->writeLn('The Received version number is not the same as the Expected version number');
             }
         }
+
+        if (!$force && $contentItem && $contentType === "discussion_topic") {
+            $output->writeLn("discussion topic");
+            $contentItemBody = $contentItem->getBody();
+            $contentItemTitle = $contentItem->getTitle();
+
+            $lmsBody = $lmsContent['body'];
+            $lmsTitle = $lmsContent['title'];
+
+            if ($contentItemBody === $lmsBody && $contentItemTitle === $lmsTitle) {
+                $output->writeLn("These are the same, returning early");
+                $contentItem->setActive(true);
+                return;
+            } else {
+                $output->writeLn("These are not the same, continue");
+            }
+        }
         
         // Compare contentItem's body against incoming lmsContent's body
         if (!$force && $contentItem && $contentType === "syllabus") {
@@ -238,6 +255,26 @@ class CanvasLms implements LmsInterface
             $output->writeLn('Debug lmsBody' . $lmsBody . '');
             */
             
+        }
+
+        if (!$force && $contentItem && $contentType === 'announcement') {
+            $output->writeLn("Content is an announcement");
+            
+            // get stored announcement info
+            $contentItemBody = $contentItem->getBody();
+            $contentItemTitle = $contentItem->getTitle();
+
+            // get incoming announcement info 
+            $lmsBody = $lmsContent['body'];
+            $lmsTitle = $lmsContent['title'];
+
+            if ($contentItemBody === $lmsBody && $contentItemTitle === $lmsTitle) {
+                $output->writeLn(' Theyre the same');
+                $contentItem->setActive(true);
+                return;
+            } else {
+                $output->writeLn("these are not the same");
+            }
         }
         
 
@@ -291,6 +328,9 @@ class CanvasLms implements LmsInterface
 
         // some content types don't have an updated date, so we'll compare content
         // to find out if content has changed.
+
+        // quizzes need to be compared against version number
+        // discussions and announcements need to have their title and body compared
         if (in_array($contentType, ['syllabus', 'discussion_topic', 'announcement', 'quiz'])) {
             if ($contentItem->getBody() === $lmsContent['body']) {
                 if ($contentItem->getUpdated()) {
@@ -454,6 +494,59 @@ class CanvasLms implements LmsInterface
 
     }
 
+    public function getAnnouncements(Course $course, user $user) {
+        $output = new ConsoleOutput();
+        $apiDomain = $this->getApiDomain($user);
+        $apiToken = $this->getApiToken($user);
+
+        $courseId = $course->getLmsCourseId();
+
+        $canvasApi = new CanvasApi($apiDomain, $apiToken);
+
+        $url = "/announcements?context_codes[]=course_{$courseId}";
+
+        $res = $canvasApi->apiGet($url);
+
+        $announcementList = $res->getContent();
+
+        $cleanedList = [];
+
+        foreach ($announcementList as $announcement) {
+            $announcementId = $announcement['id'];
+            $announcementTitle = $announcement['title'];
+            // technically not body but message
+            $announcementBody = $announcement['message'];
+
+            $cleanedList[] = [
+                'id' => $announcementId,
+                'title' => $announcementTitle,
+                'body' => $announcementBody,
+            ];
+
+
+        };
+
+        return $cleanedList;
+    }
+
+    public function getDiscussions(Course $course, User $user) {
+        $output = new ConsoleOutput(); // log
+        $apiDomain = $this->getApiDomain($user);
+        $apiToken = $this->getApiToken($user);
+
+        $courseId = $course->getLmsCourseId();
+
+        $canvasApi = new CanvasApi($apiDomain, $apiToken);
+
+        $url = "courses/{$courseId}/discussion_topics";
+
+        $res = $canvasApi->apiGet($url);
+
+        $discussionList = $res->getContent();
+
+        return $discussionList;
+    }
+
     // List all quiz objects
     public function getQuizzes(Course $course, User $user) {
         $output = new ConsoleOutput(); // log
@@ -520,8 +613,14 @@ class CanvasLms implements LmsInterface
         //$output->writeLn("Printing list of quizzes in a course");
         //$output->writeLn(print_r($this->getQuizzes($course, $user), true));
 
-        $output->writeLn("Printing list of syllabi in a course");
-        $output->writeLn(print_r($this->getSyllabus($course, $user), true));
+        //$output->writeLn("Printing list of syllabi in a course");
+        //$output->writeLn(print_r($this->getSyllabus($course, $user), true));
+
+        // $output->writeLn("Printing list of announcements");
+        // $output->writeLn(print_r($this->getAnnouncements($course, $user), true));
+
+        // $output->writeLn("Printing list of discussions");
+        // $output->writeLn(print_r($this->getDiscussions($course, $user), true));
 
         foreach ($urls as $contentType => $url) {
             $response = $canvasApi->apiGet($url);
