@@ -206,8 +206,31 @@ class CanvasLms implements LmsInterface
             if ($lmsVersionNumber === $contentVersionNumber) {
                 
                 if ($contentItem->isPublished()) {
-                    $output->writeLn('Quiz is published, skipping update\n');
+                    $output->writeLn('Quiz is published, skipping update');
+
+                    // Get quiz questions associated with the lmsContentId that a contentItem has                    
+                    $lmsContentId = $contentItem->getLmsContentId();
+
+                    $tempData['parentLmsId'] = "{$lmsContentId}";                    
+
+                    $output->writeln("lmsContentId of quiz: " . $lmsContentId . "");
+                    $quizQuestions = $this->contentItemRepo->findBy(
+                        [
+                            'contentType' => 'quiz_question',
+                            'metadata' => json_encode($tempData),
+                        ]
+                    );
+                    if ($quizQuestions) {
+                        $output->writeln('found ' . count($quizQuestions) . ' for quiz ' . $contentItem->getTitle() . '');
+                    } else {
+                        $output->writeln('empty for some reason?');
+                    }
+                    foreach ($quizQuestions as $question) {
+                        $question->setActive(true);
+                    }
+
                     $contentItem->setActive(true);
+
                     return;
                 } 
                 else {
@@ -596,6 +619,25 @@ class CanvasLms implements LmsInterface
 
     }
 
+    // get list of quiz questions
+    public function getQuizQuestions(Course $course, User $user, int $quizId) {
+        $apiDomain = $this->getApiDomain($user);
+        $apiToken = $this->getApiToken($user);
+
+        $courseId = $course->getLmsCourseId();
+
+        $canvasApi = new CanvasApi($apiDomain, $apiToken);
+
+        $url = "courses/{$courseId}/quizzes/{$quizId}/questions";
+
+        $res = $canvasApi->apiGet($url);
+
+        $questionsList = $res->getContent();
+
+        return $questionsList;
+
+    }
+
     // Get content from Canvas and update content items
     public function updateCourseContent(Course $course, User $user, $force = false): array
     {
@@ -609,9 +651,20 @@ class CanvasLms implements LmsInterface
         $canvasApi = new CanvasApi($apiDomain, $apiToken);
         $scanFails = 0;
 
+        /*
+        $tempList = $this->getQuizzes($course, $user);
+
         // Debug
-        //$output->writeLn("Printing list of quizzes in a course");
-        //$output->writeLn(print_r($this->getQuizzes($course, $user), true));
+        $output->writeLn("Printing list of quizzes in a course");
+        $output->writeLn(print_r($tempList, true));
+
+        foreach ($tempList as $question) {
+            $id = $question['id'];
+            $output->writeLn("Printing quiz questions");
+            $output->writeLn(Print_r($this->getQuizQuestions($course, $user, $id), true));
+        }
+        */
+
 
         //$output->writeLn("Printing list of syllabi in a course");
         //$output->writeLn(print_r($this->getSyllabus($course, $user), true));
