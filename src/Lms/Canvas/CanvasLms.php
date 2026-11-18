@@ -186,122 +186,74 @@ class CanvasLms implements LmsInterface
         ]);
         $childContentItems = [];
 
-        if (!$force && $contentItem && $contentType === 'quiz') {
-            
-            $output->writeLn('this is a quiz');
-
-            // get lmsContent version number
-            $lmsVersionNumber = $lmsContent['version_number'];
-            
-            // get contentItem version number stored in metadata
-            $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
-            if (is_array($metadata)) {
-                $contentVersionNumber = $metadata['quizVersion'];
-            }
-
-            $output->writeln('Version Expected: ' . $contentVersionNumber . ' Version Received: ' . $lmsVersionNumber . '');
-
-            // If stored and incoming version number are the same, check if the quiz is published
-            // if it is published, early exit, otherwise update the quiz
-            if ($lmsVersionNumber === $contentVersionNumber) {
-                
-                if ($contentItem->isPublished()) {
-                    $output->writeLn('Quiz is published, skipping update');
-
-                    // Get quiz questions associated with the lmsContentId that a contentItem has                    
-                    $lmsContentId = $contentItem->getLmsContentId();
-
-                    $tempData['parentLmsId'] = "{$lmsContentId}";                    
-
-                    $output->writeln("lmsContentId of quiz: " . $lmsContentId . "");
-                    $quizQuestions = $this->contentItemRepo->findBy(
-                        [
-                            'contentType' => 'quiz_question',
-                            'metadata' => json_encode($tempData),
-                        ]
-                    );
-                    if ($quizQuestions) {
-                        $output->writeln('found ' . count($quizQuestions) . ' for quiz ' . $contentItem->getTitle() . '');
-                    } else {
-                        $output->writeln('empty for some reason?');
-                    }
-                    foreach ($quizQuestions as $question) {
-                        $question->setActive(true);
-                    }
-
-                    $contentItem->setActive(true);
-
-                    return;
-                } 
-                else {
-                    $output->writeLn('Quiz is not published, updating');
-                }
-
-            } else {
-                $output->writeLn('The Received version number is not the same as the Expected version number');
-            }
-        }
-
-        if (!$force && $contentItem && $contentType === "discussion_topic") {
-            $output->writeLn("discussion topic");
-            $contentItemBody = $contentItem->getBody();
-            $contentItemTitle = $contentItem->getTitle();
-
-            $lmsBody = $lmsContent['body'];
-            $lmsTitle = $lmsContent['title'];
-
-            if ($contentItemBody === $lmsBody && $contentItemTitle === $lmsTitle) {
-                $output->writeLn("These are the same, returning early");
-                $contentItem->setActive(true);
-                return;
-            } else {
-                $output->writeLn("These are not the same, continue");
-            }
-        }
-        
-        // Compare contentItem's body against incoming lmsContent's body
-        if (!$force && $contentItem && $contentType === "syllabus") {
-            $contentItemBody = $contentItem->getBody();
-            $lmsBody = $lmsContent['body'];
-
-            // if stored body and incoming body are the same early exit
-            if ($contentItemBody === $lmsBody) {
-                $output->writeLn('these are the same, returning early');
-                $contentItem->setActive(true);
-                return;
-            } else {
-                $output->writeLn('these are not the same');
-            }
-
-            /*
-            $output->writeLn('Debug contentItemBody:' . $contentItemBody . '');
-            $output->writeLn('Debug lmsBody' . $lmsBody . '');
-            */
-            
-        }
-
-        if (!$force && $contentItem && $contentType === 'announcement') {
-            $output->writeLn("Content is an announcement");
-            
-            // get stored announcement info
-            $contentItemBody = $contentItem->getBody();
-            $contentItemTitle = $contentItem->getTitle();
-
-            // get incoming announcement info 
-            $lmsBody = $lmsContent['body'];
-            $lmsTitle = $lmsContent['title'];
-
-            if ($contentItemBody === $lmsBody && $contentItemTitle === $lmsTitle) {
-                $output->writeLn(' Theyre the same');
-                $contentItem->setActive(true);
-                return;
-            } else {
-                $output->writeLn("these are not the same");
-            }
-        }
-        
-
         if (!$force && $contentItem) {
+            switch($contentType) {
+                case 'syllabus':
+                case 'announcement':
+                case 'discussion_topic':
+                case 'quiz_question':
+                    $output->writeln("" . $contentType . "");
+                    
+                    $contentItemTitle = $contentItem->getTitle();
+                    $contentItemBody = $contentItem->getBody();
+
+                    $lmsTitle = $lmsContent['title'];
+                    $lmsBody = $lmsContent['body'];                
+
+                    if ($contentItemTitle !== $lmsTitle) {
+                        $output->writeln("title has been changed");
+                        $contentItem->update($lmsContent);
+                    } 
+
+                    if ($contentItemBody === $lmsBody) {
+                        $contentItem->setActive(true);
+                        return;
+                    }
+                    else {
+                        $output->writeln("Body has been changed");
+                    }
+
+                    break;
+                case 'quiz':
+
+                    // get version number stored in content item's metadata
+                    $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
+
+                    if (is_array($metadata)) {
+                        $contentVersionNumber = $metadata['quizVersion'];
+                    }
+
+                    $lmsVersionNumber = $lmsContent['version_number'];
+
+                    if ($lmsVersionNumber === $contentVersionNumber) {
+                    
+                        if ($contentItem->isPublished()) {
+                            $output->writeLn('Quiz is published, skipping update');
+
+                            // Get quiz questions associated with the lmsContentId that a contentItem has                    
+                            $lmsContentId = $contentItem->getLmsContentId();
+
+                            $tempData['parentLmsId'] = "{$lmsContentId}";                    
+
+                            $quizQuestions = $this->contentItemRepo->findBy(
+                                [
+                                    'course' => $course,
+                                    'contentType' => 'quiz_question',
+                                    'metadata' => json_encode($tempData),
+                                ]
+                            );
+
+                            foreach ($quizQuestions as $question) {
+                                $question->setActive(true);
+                            }
+
+                            $contentItem->setActive(true);
+                            return;
+                        }
+                    }
+
+                    break;
+            }
             $contentItemUpdated = $contentItem->getUpdated();
             $lmsUpdated = new \DateTime($lmsContent['updated'], UtilityService::$timezone);
             if ($contentItemUpdated == $lmsUpdated) {
@@ -336,7 +288,7 @@ class CanvasLms implements LmsInterface
             $this->entityManager->persist($contentItem);
         }
 
-        // if contentItem is a quiz, insert its version into metadata
+        // Store quiz's version number in metadata
         if ($contentType === 'quiz') {
             $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
 
@@ -357,7 +309,6 @@ class CanvasLms implements LmsInterface
         if (in_array($contentType, ['syllabus', 'discussion_topic', 'announcement', 'quiz'])) {
             if ($contentItem->getBody() === $lmsContent['body']) {
                 if ($contentItem->getUpdated()) {
-                    // $output->writeln("this ran ");
                     $lmsContent['updated'] = $contentItem->getUpdated()->format('c');
                 }
             }
@@ -650,30 +601,6 @@ class CanvasLms implements LmsInterface
 
         $canvasApi = new CanvasApi($apiDomain, $apiToken);
         $scanFails = 0;
-
-        /*
-        $tempList = $this->getQuizzes($course, $user);
-
-        // Debug
-        $output->writeLn("Printing list of quizzes in a course");
-        $output->writeLn(print_r($tempList, true));
-
-        foreach ($tempList as $question) {
-            $id = $question['id'];
-            $output->writeLn("Printing quiz questions");
-            $output->writeLn(Print_r($this->getQuizQuestions($course, $user, $id), true));
-        }
-        */
-
-
-        //$output->writeLn("Printing list of syllabi in a course");
-        //$output->writeLn(print_r($this->getSyllabus($course, $user), true));
-
-        // $output->writeLn("Printing list of announcements");
-        // $output->writeLn(print_r($this->getAnnouncements($course, $user), true));
-
-        // $output->writeLn("Printing list of discussions");
-        // $output->writeLn(print_r($this->getDiscussions($course, $user), true));
 
         foreach ($urls as $contentType => $url) {
             $response = $canvasApi->apiGet($url);
@@ -1371,13 +1298,10 @@ class CanvasLms implements LmsInterface
                 break;
 
             case 'quiz':
-                // $output->writeLn('Quiz detected');
                 $out['id'] = $lmsContent['id'];
                 $out['title'] = $lmsContent['title'];
                 $out['updated'] = 'now';
-                // $output->writeLn('Version Number: ' . $lmsContent['version_number'] . "");
                 $out['version_number'] = $lmsContent['version_number'];
-
                 $out['body'] = $lmsContent['description'];
                 $out['status'] = $lmsContent['published'];
                 $out['url'] = "{$baseUrl}/quizzes/{$lmsContent['id']}";
