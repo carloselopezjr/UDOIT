@@ -215,43 +215,37 @@ class CanvasLms implements LmsInterface
 
                     break;
                 case 'quiz':
-
-                    // get version number stored in content item's metadata
+                    // get version number and associated question IDs from metadata
                     $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
+                    $contentVersionNumber = $metadata['quizVersion'] ?? null;
+                    $lmsVersionNumber = $lmsContent['version_number'] ?? null;
+                    $questionIDs = $metadata['questionIDs'] ?? null;
 
-                    if (is_array($metadata)) {
-                        $contentVersionNumber = $metadata['quizVersion'];
-                    }
+                    if ($contentVersionNumber !== null 
+                        && $contentVersionNumber === $lmsVersionNumber 
+                        && $contentItem->isPublished()
+                        && is_array($questionIDs)) {
 
-                    $lmsVersionNumber = $lmsContent['version_number'];
-
-                    if ($lmsVersionNumber === $contentVersionNumber) {
-                    
-                        if ($contentItem->isPublished()) {
-                            $output->writeLn('Quiz is published, skipping update');
-
-                            // Get quiz questions associated with the lmsContentId that a contentItem has                    
-                            $lmsContentId = $contentItem->getLmsContentId();
-
-                            $tempData['parentLmsId'] = "{$lmsContentId}";                    
-
-                            $quizQuestions = $this->contentItemRepo->findBy(
+                             // this should in theory ensure that inactive questions remain inactive
+                            $quizQuestions = $questionIDs === [] ? [] : $this->contentItemRepo->findBy(
                                 [
                                     'course' => $course,
                                     'contentType' => 'quiz_question',
-                                    'metadata' => json_encode($tempData),
+                                    'lmsContentId' => $questionIDs,
                                 ]
                             );
 
-                            foreach ($quizQuestions as $question) {
-                                $question->setActive(true);
+                            $output->writeln("quiz questions: " . count($quizQuestions) . "");
+                            $output->writeln("quiz ids: " . count($questionIDs) . "");
+                            if (count($quizQuestions) === count($questionIDs)) {
+                                foreach ($quizQuestions as $question) {
+                                    $question->setActive(true);
+                                }
                             }
-
+                            
                             $contentItem->setActive(true);
                             return;
-                        }
                     }
-
                     break;
             }
             $contentItemUpdated = $contentItem->getUpdated();
@@ -288,19 +282,6 @@ class CanvasLms implements LmsInterface
             $this->entityManager->persist($contentItem);
         }
 
-        // Store quiz's version number in metadata
-        if ($contentType === 'quiz') {
-            $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
-
-            if (!is_array($metadata)) {
-                $metadata = [];
-            }
-
-            $metadata['quizVersion'] = $lmsContent['version_number'] ?? null;
-
-            $contentItem->setMetadata(json_encode($metadata, JSON_THROW_ON_ERROR));
-        }
-
         // some content types don't have an updated date, so we'll compare content
         // to find out if content has changed.
 
@@ -321,10 +302,23 @@ class CanvasLms implements LmsInterface
             $url = $this->getCourseContentItemUrls($course->getLmsCourseId(), $contentType, $lmsContent['id']);
             $quizResponse = $canvasApi->apiGet($url);
             $quizQuestions = $quizResponse->getContent();
-
             foreach ($quizQuestions as $question) {
                 $this->saveOrUpdateContentItem($canvasApi, $course, 'quiz_question', $question, $force, $lmsContent['id']);
             }
+
+            $metadata = json_decode($contentItem->getMetadata() ?? '{}', true);
+
+            if (!is_array($metadata)) {
+                $metadata = [];
+            }
+
+            $questionIDs = array_column($quizQuestions, 'id');
+            //$output->writeln(print_r($questionIds, true));
+            //$output->writeln("# of questions: " . count($questionIds) . "");
+
+            $metadata['quizVersion'] = $lmsContent['version_number'] ?? null;
+            $metadata['questionIDs'] = $questionIDs;
+            $contentItem->setMetadata(json_encode($metadata, JSON_THROW_ON_ERROR));
         }
     }
 
